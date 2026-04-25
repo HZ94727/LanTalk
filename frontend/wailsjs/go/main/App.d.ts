@@ -8,7 +8,11 @@ export function Bootstrap():Promise<chat.Snapshot>;
 
 export function ChooseDataDirectory():Promise<string>;
 
+export function CopyImageToClipboard(arg1:string):Promise<void>;
+
 export function DataPath():Promise<string>;
+
+export function DeleteMessage(arg1:string,arg2:string):Promise<void>;
 
 export function EnsureDebugPeer():Promise<chat.Peer>;
 

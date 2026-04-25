@@ -256,6 +256,14 @@ func (s *Store) SaveMessage(message ChatMessage) error {
 	return err
 }
 
+func (s *Store) DeleteMessage(messageID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM messages WHERE id = ?`, messageID)
+	return err
+}
+
 func (s *Store) Path() string {
 	return s.path
 }

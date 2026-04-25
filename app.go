@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"LanTalk/internal/clipimg"
 	"LanTalk/internal/chat"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -78,6 +79,14 @@ func (a *App) SendChatMessage(peerID, text string) error {
 
 func (a *App) SendImageMessage(peerID, dataURL, fileName string) error {
 	return a.service.SendImageMessage(peerID, dataURL, fileName)
+}
+
+func (a *App) DeleteMessage(peerID, messageID string) error {
+	return a.service.DeleteMessage(peerID, messageID)
+}
+
+func (a *App) CopyImageToClipboard(dataURL string) error {
+	return clipimg.WriteImageDataURL(dataURL)
 }
 
 func (a *App) UpdateLanguage(language string) (chat.Settings, error) {

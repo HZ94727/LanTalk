@@ -14,8 +14,16 @@ export function ChooseDataDirectory() {
   return window['go']['main']['App']['ChooseDataDirectory']();
 }
 
+export function CopyImageToClipboard(arg1) {
+  return window['go']['main']['App']['CopyImageToClipboard'](arg1);
+}
+
 export function DataPath() {
   return window['go']['main']['App']['DataPath']();
+}
+
+export function DeleteMessage(arg1, arg2) {
+  return window['go']['main']['App']['DeleteMessage'](arg1, arg2);
 }
 
 export function EnsureDebugPeer() {

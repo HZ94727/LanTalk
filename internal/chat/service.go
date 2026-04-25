@@ -294,6 +294,48 @@ func (s *Service) SendImageMessage(peerID, dataURL, fileName string) error {
 	return nil
 }
 
+func (s *Service) DeleteMessage(peerID, messageID string) error {
+	peerID = strings.TrimSpace(peerID)
+	messageID = strings.TrimSpace(messageID)
+	if peerID == "" || messageID == "" {
+		return errors.New("peer id and message id are required")
+	}
+
+	s.mu.Lock()
+	messages, ok := s.conversations[peerID]
+	if !ok {
+		s.mu.Unlock()
+		return errors.New("conversation not found")
+	}
+
+	nextMessages := make([]ChatMessage, 0, len(messages))
+	removed := false
+	for _, message := range messages {
+		if message.ID == messageID {
+			removed = true
+			continue
+		}
+		nextMessages = append(nextMessages, message)
+	}
+	if !removed {
+		s.mu.Unlock()
+		return errors.New("message not found")
+	}
+
+	s.conversations[peerID] = nextMessages
+	if err := s.store.DeleteMessage(messageID); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	snapshot := append([]ChatMessage(nil), nextMessages...)
+	s.mu.Unlock()
+
+	if s.callbacks.OnMessage != nil {
+		s.callbacks.OnMessage(peerID, snapshot)
+	}
+	return nil
+}
+
 func (s *Service) EnsureDebugPeer() Peer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
