@@ -20,7 +20,10 @@ type ChatMessage struct {
 	PeerID     string `json:"peerId"`
 	SenderID   string `json:"senderId"`
 	SenderName string `json:"senderName"`
+	Kind       string `json:"kind"`
 	Text       string `json:"text"`
+	MediaName  string `json:"mediaName"`
+	MediaType  string `json:"mediaType"`
 	Timestamp  int64  `json:"timestamp"`
 	Direction  string `json:"direction"`
 	Status     string `json:"status"`
@@ -48,6 +51,9 @@ type directMessage struct {
 	ID         string `json:"id"`
 	SenderID   string `json:"senderId"`
 	SenderName string `json:"senderName"`
+	Kind       string `json:"kind"`
 	Text       string `json:"text"`
+	MediaName  string `json:"mediaName"`
+	MediaType  string `json:"mediaType"`
 	Timestamp  int64  `json:"timestamp"`
 }

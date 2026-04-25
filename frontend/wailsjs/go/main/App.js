@@ -26,6 +26,10 @@ export function SendChatMessage(arg1, arg2) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2);
 }
 
+export function SendImageMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SendImageMessage'](arg1, arg2, arg3);
+}
+
 export function UpdateDisplayName(arg1) {
   return window['go']['main']['App']['UpdateDisplayName'](arg1);
 }

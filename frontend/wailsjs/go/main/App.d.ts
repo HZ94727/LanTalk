@@ -14,6 +14,8 @@ export function EnsureDebugPeer():Promise<chat.Peer>;
 
 export function SendChatMessage(arg1:string,arg2:string):Promise<void>;
 
+export function SendImageMessage(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function UpdateDisplayName(arg1:string):Promise<chat.Profile>;
 
 export function UpdateLanguage(arg1:string):Promise<chat.Settings>;

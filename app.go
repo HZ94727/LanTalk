@@ -76,6 +76,10 @@ func (a *App) SendChatMessage(peerID, text string) error {
 	return a.service.SendMessage(peerID, text)
 }
 
+func (a *App) SendImageMessage(peerID, dataURL, fileName string) error {
+	return a.service.SendImageMessage(peerID, dataURL, fileName)
+}
+
 func (a *App) UpdateLanguage(language string) (chat.Settings, error) {
 	return a.service.UpdateLanguage(language)
 }

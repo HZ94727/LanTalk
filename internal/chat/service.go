@@ -2,10 +2,12 @@ package chat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ const (
 	broadcastEvery   = 2 * time.Second
 	peerExpiry       = 8 * time.Second
 	maxMessageLength = 2000
+	maxImageBytes    = 4 * 1024 * 1024
 	debugEchoPeerID  = "debug-echo-bot"
 )
 
@@ -68,7 +71,7 @@ func NewService(appName string, callbacks Callbacks) (*Service, error) {
 		store:         store,
 		self:          self,
 		settings:      normalizeSettings(state.Settings),
-		peers:         make(map[string]Peer),
+		peers:         peersByID(state.Peers),
 		conversations: state.Conversations,
 		callbacks:     callbacks,
 	}, nil
@@ -91,7 +94,7 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.self.ListenPort = addr.Port
-	if err := s.persistLocked(); err != nil {
+	if err := s.store.SaveProfile(s.self); err != nil {
 		s.mu.Unlock()
 		return err
 	}
@@ -153,7 +156,7 @@ func (s *Service) UpdateDisplayName(name string) (Profile, error) {
 
 	s.mu.Lock()
 	s.self.Name = name
-	if err := s.persistLocked(); err != nil {
+	if err := s.store.SaveProfile(s.self); err != nil {
 		s.mu.Unlock()
 		return Profile{}, err
 	}
@@ -188,6 +191,7 @@ func (s *Service) SendMessage(peerID, text string) error {
 		PeerID:     peerID,
 		SenderID:   self.ID,
 		SenderName: self.Name,
+		Kind:       "text",
 		Text:       text,
 		Timestamp:  time.Now().UnixMilli(),
 		Direction:  "outbound",
@@ -198,13 +202,85 @@ func (s *Service) SendMessage(peerID, text string) error {
 		ID:         message.ID,
 		SenderID:   self.ID,
 		SenderName: self.Name,
+		Kind:       message.Kind,
 		Text:       text,
+		MediaName:  "",
+		MediaType:  "",
 		Timestamp:  message.Timestamp,
 	}
 
 	if peer.Source == "debug" {
 		s.appendMessage(peerID, message)
-		go s.sendDebugReply(peer, text)
+		go s.sendDebugReply(peer, message)
+		return nil
+	}
+
+	if err := s.sendDirect(peer, payload); err != nil {
+		message.Status = "failed"
+		s.appendMessage(peerID, message)
+		return err
+	}
+
+	s.appendMessage(peerID, message)
+	return nil
+}
+
+func (s *Service) SendImageMessage(peerID, dataURL, fileName string) error {
+	dataURL = strings.TrimSpace(dataURL)
+	if dataURL == "" {
+		return errors.New("image payload is empty")
+	}
+
+	mediaType, payloadSize, err := validateImageDataURL(dataURL)
+	if err != nil {
+		return err
+	}
+	if payloadSize > maxImageBytes {
+		return fmt.Errorf("image too large, max %d MB", maxImageBytes/(1024*1024))
+	}
+
+	fileName = strings.TrimSpace(fileName)
+	if fileName == "" {
+		fileName = "image"
+	}
+	fileName = filepath.Base(fileName)
+
+	s.mu.RLock()
+	peer, ok := s.peers[peerID]
+	self := s.self
+	s.mu.RUnlock()
+	if !ok {
+		return errors.New("peer is offline")
+	}
+
+	message := ChatMessage{
+		ID:         uuid.NewString(),
+		PeerID:     peerID,
+		SenderID:   self.ID,
+		SenderName: self.Name,
+		Kind:       "image",
+		Text:       dataURL,
+		MediaName:  fileName,
+		MediaType:  mediaType,
+		Timestamp:  time.Now().UnixMilli(),
+		Direction:  "outbound",
+		Status:     "sent",
+	}
+
+	payload := directMessage{
+		ID:         message.ID,
+		SenderID:   self.ID,
+		SenderName: self.Name,
+		Kind:       message.Kind,
+		Text:       message.Text,
+		MediaName:  message.MediaName,
+		MediaType:  message.MediaType,
+		Timestamp:  message.Timestamp,
+	}
+
+	if peer.Source == "debug" {
+		s.appendMessage(peerID, message)
+		go s.sendDebugReply(peer, message)
 		return nil
 	}
 
@@ -236,6 +312,7 @@ func (s *Service) EnsureDebugPeer() Peer {
 		Source:     "debug",
 	}
 	s.peers[peer.ID] = peer
+	_ = s.store.SavePeer(peer)
 	s.emitPeersLocked()
 	return peer
 }
@@ -265,6 +342,7 @@ func (s *Service) AddManualPeer(name, address string, port int) (Peer, error) {
 					peer.Source = "manual"
 				}
 				s.peers[peer.ID] = peer
+				_ = s.store.SavePeer(peer)
 				s.emitPeersLocked()
 			}
 			return peer, nil
@@ -280,6 +358,7 @@ func (s *Service) AddManualPeer(name, address string, port int) (Peer, error) {
 		Source:     "manual",
 	}
 	s.peers[peer.ID] = peer
+	_ = s.store.SavePeer(peer)
 	s.emitPeersLocked()
 	return peer, nil
 }
@@ -292,7 +371,7 @@ func (s *Service) UpdateLanguage(language string) (Settings, error) {
 
 	s.mu.Lock()
 	s.settings = settings
-	if err := s.persistLocked(); err != nil {
+	if err := s.store.SaveSettings(s.settings); err != nil {
 		s.mu.Unlock()
 		return Settings{}, err
 	}
@@ -310,7 +389,7 @@ func (s *Service) UpdateTheme(theme string) (Settings, error) {
 
 	s.mu.Lock()
 	s.settings = settings
-	if err := s.persistLocked(); err != nil {
+	if err := s.store.SaveSettings(s.settings); err != nil {
 		s.mu.Unlock()
 		return Settings{}, err
 	}
@@ -331,12 +410,7 @@ func (s *Service) MoveDataFile(targetDir string) (string, error) {
 	}
 
 	s.mu.Lock()
-	state := persistedState{
-		Profile:       s.self,
-		Settings:      s.settings,
-		Conversations: s.conversations,
-	}
-	newPath, err := s.store.Move(state, targetDir)
+	newPath, err := s.store.Move(targetDir)
 	s.mu.Unlock()
 	if err != nil {
 		return "", err
@@ -367,7 +441,8 @@ func (s *Service) handleIncoming(conn net.Conn) {
 	if err := json.NewDecoder(conn).Decode(&payload); err != nil {
 		return
 	}
-	if strings.TrimSpace(payload.Text) == "" {
+	message, err := directPayloadToMessage(payload)
+	if err != nil {
 		return
 	}
 
@@ -376,17 +451,7 @@ func (s *Service) handleIncoming(conn net.Conn) {
 		return
 	}
 
-	message := ChatMessage{
-		ID:         payload.ID,
-		PeerID:     peerID,
-		SenderID:   payload.SenderID,
-		SenderName: payload.SenderName,
-		Text:       payload.Text,
-		Timestamp:  payload.Timestamp,
-		Direction:  "inbound",
-		Status:     "received",
-	}
-
+	message.PeerID = peerID
 	s.appendMessage(peerID, message)
 }
 
@@ -436,6 +501,7 @@ func (s *Service) handleAnnouncement(incoming announcement, addr *net.UDPAddr) {
 		LastSeen:   time.Now().UnixMilli(),
 		Source:     "lan",
 	}
+	_ = s.store.SavePeer(s.peers[incoming.ID])
 
 	s.emitPeersLocked()
 }
@@ -506,6 +572,7 @@ func (s *Service) cleanupPeers() {
 		lastSeen := time.UnixMilli(peer.LastSeen)
 		if now.Sub(lastSeen) > peerExpiry {
 			delete(s.peers, id)
+			_ = s.store.DeletePeer(id)
 			changed = true
 		}
 	}
@@ -515,7 +582,7 @@ func (s *Service) cleanupPeers() {
 	}
 }
 
-func (s *Service) sendDebugReply(peer Peer, text string) {
+func (s *Service) sendDebugReply(peer Peer, source ChatMessage) {
 	delay := 550 * time.Millisecond
 	time.Sleep(delay)
 
@@ -524,7 +591,10 @@ func (s *Service) sendDebugReply(peer Peer, text string) {
 		PeerID:     peer.ID,
 		SenderID:   peer.ID,
 		SenderName: peer.Name,
-		Text:       debugReplyText(text),
+		Kind:       source.Kind,
+		Text:       debugReplyText(source),
+		MediaName:  source.MediaName,
+		MediaType:  source.MediaType,
 		Timestamp:  time.Now().UnixMilli(),
 		Direction:  "inbound",
 		Status:     "received",
@@ -532,8 +602,12 @@ func (s *Service) sendDebugReply(peer Peer, text string) {
 	s.appendMessage(peer.ID, reply)
 }
 
-func debugReplyText(text string) string {
-	trimmed := strings.TrimSpace(text)
+func debugReplyText(message ChatMessage) string {
+	if message.Kind == "image" {
+		return message.Text
+	}
+
+	trimmed := strings.TrimSpace(message.Text)
 	if trimmed == "" {
 		return "Echo Bot: ..."
 	}
@@ -544,7 +618,7 @@ func (s *Service) appendMessage(peerID string, message ChatMessage) {
 	s.mu.Lock()
 	s.conversations[peerID] = append(s.conversations[peerID], message)
 	messages := append([]ChatMessage(nil), s.conversations[peerID]...)
-	_ = s.persistLocked()
+	_ = s.store.SaveMessage(message)
 	s.mu.Unlock()
 
 	if s.callbacks.OnMessage != nil {
@@ -559,16 +633,83 @@ func (s *Service) sendDirect(peer Peer, payload directMessage) error {
 	}
 	defer conn.Close()
 
-	_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(12 * time.Second))
 	return json.NewEncoder(conn).Encode(payload)
 }
 
-func (s *Service) persistLocked() error {
-	return s.store.Save(persistedState{
-		Profile:       s.self,
-		Settings:      s.settings,
-		Conversations: s.conversations,
-	})
+func directPayloadToMessage(payload directMessage) (ChatMessage, error) {
+	kind := payload.Kind
+	if kind == "" {
+		kind = "text"
+	}
+
+	message := ChatMessage{
+		ID:         payload.ID,
+		SenderID:   payload.SenderID,
+		SenderName: payload.SenderName,
+		Kind:       kind,
+		Text:       payload.Text,
+		MediaName:  payload.MediaName,
+		MediaType:  payload.MediaType,
+		Timestamp:  payload.Timestamp,
+		Direction:  "inbound",
+		Status:     "received",
+	}
+
+	switch kind {
+	case "image":
+		mediaType, payloadSize, err := validateImageDataURL(payload.Text)
+		if err != nil {
+			return ChatMessage{}, err
+		}
+		if payloadSize > maxImageBytes {
+			return ChatMessage{}, fmt.Errorf("image too large")
+		}
+		if strings.TrimSpace(message.MediaType) == "" {
+			message.MediaType = mediaType
+		}
+		if strings.TrimSpace(message.MediaName) == "" {
+			message.MediaName = "image"
+		}
+	case "text":
+		if strings.TrimSpace(payload.Text) == "" {
+			return ChatMessage{}, errors.New("message cannot be empty")
+		}
+	default:
+		return ChatMessage{}, fmt.Errorf("unsupported message kind: %s", kind)
+	}
+
+	return message, nil
+}
+
+func validateImageDataURL(value string) (string, int, error) {
+	if !strings.HasPrefix(value, "data:image/") {
+		return "", 0, errors.New("only image data URLs are supported")
+	}
+	parts := strings.SplitN(value, ",", 2)
+	if len(parts) != 2 {
+		return "", 0, errors.New("invalid image payload")
+	}
+	header := parts[0]
+	if !strings.HasSuffix(header, ";base64") {
+		return "", 0, errors.New("image payload must be base64 encoded")
+	}
+	mediaType := strings.TrimPrefix(header, "data:")
+	mediaType = strings.TrimSuffix(mediaType, ";base64")
+	if mediaType == "" {
+		return "", 0, errors.New("missing image media type")
+	}
+
+	decodedLen := base64.StdEncoding.DecodedLen(len(parts[1]))
+	if decodedLen <= 0 {
+		return "", 0, errors.New("invalid image payload")
+	}
+
+	if _, err := base64.StdEncoding.DecodeString(parts[1]); err != nil {
+		return "", 0, errors.New("invalid base64 image payload")
+	}
+
+	return mediaType, decodedLen, nil
 }
 
 func (s *Service) emitProfile(profile Profile) {
@@ -648,4 +789,12 @@ func normalizeSettings(settings Settings) Settings {
 	}
 
 	return normalized
+}
+
+func peersByID(peers []Peer) map[string]Peer {
+	peerMap := make(map[string]Peer, len(peers))
+	for _, peer := range peers {
+		peerMap[peer.ID] = peer
+	}
+	return peerMap
 }

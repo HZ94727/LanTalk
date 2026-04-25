@@ -2,7 +2,7 @@ import './style.css';
 import './app.css';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
-import { AddManualPeer, Bootstrap, ChooseDataDirectory, DataPath, EnsureDebugPeer, SendChatMessage, UpdateDisplayName, UpdateLanguage, UpdateTheme } from '../wailsjs/go/main/App';
+import { AddManualPeer, Bootstrap, ChooseDataDirectory, DataPath, EnsureDebugPeer, SendChatMessage, SendImageMessage, UpdateDisplayName, UpdateLanguage, UpdateTheme } from '../wailsjs/go/main/App';
 
 const dictionaries = {
   'zh-CN': {
@@ -39,6 +39,14 @@ const dictionaries = {
     noPeers: '暂时还没有发现其他用户。',
     emptyConversationTitle: '会话还是空的',
     emptyConversationBody: '和 {name} 打个招呼吧。',
+    emoji: '表情',
+    image: '图片',
+    emojiSmileys: '常用笑脸',
+    emojiGestures: '手势互动',
+    emojiHearts: '情绪氛围',
+    emojiNature: '自然元素',
+    imageTooLarge: '图片过大，请选择 4MB 以内的图片。',
+    imageAlt: '图片消息',
     bootFailed: 'LanTalk 启动失败',
     idAndPort: 'ID: {id}  TCP: {port}',
     sent: '已发送',
@@ -84,6 +92,14 @@ const dictionaries = {
     noPeers: 'No peers discovered yet.',
     emptyConversationTitle: 'Conversation is empty',
     emptyConversationBody: 'Say hello to {name}.',
+    emoji: 'Emoji',
+    image: 'Image',
+    emojiSmileys: 'Smileys',
+    emojiGestures: 'Gestures',
+    emojiHearts: 'Mood',
+    emojiNature: 'Nature',
+    imageTooLarge: 'Image is too large. Please choose one under 4 MB.',
+    imageAlt: 'Image message',
     bootFailed: 'LanTalk failed to boot',
     idAndPort: 'ID: {id}  TCP: {port}',
     sent: 'sent',
@@ -96,6 +112,27 @@ const dictionaries = {
     themeForest: 'Forest Night',
   },
 };
+
+const emojiGroups = [
+  {
+    labelKey: 'emojiSmileys',
+    items: ['😀', '😄', '😁', '😂', '🙂', '😉', '😍', '🥳', '🤔', '😭', '😴', '😎'],
+  },
+  {
+    labelKey: 'emojiGestures',
+    items: ['👍', '👋', '👏', '🙏', '💪', '✌️', '👌', '🤝', '🙌', '🤞', '👀', '🔥'],
+  },
+  {
+    labelKey: 'emojiHearts',
+    items: ['❤️', '💙', '💚', '💛', '💜', '🧡', '💯', '✨', '⭐', '🎉', '🎈', '🎵'],
+  },
+  {
+    labelKey: 'emojiNature',
+    items: ['🌞', '🌙', '🌧️', '⛄', '🌸', '🍀', '🌲', '🌊', '🍎', '🍕', '☕', '🐱'],
+  },
+];
+
+const maxImageBytes = 4 * 1024 * 1024;
 
 document.querySelector('#app').innerHTML = `
   <div class="shell">
@@ -196,6 +233,27 @@ document.querySelector('#app').innerHTML = `
       <section id="messageList" class="message-list empty"></section>
 
       <form id="composer" class="composer">
+        <div class="composer-toolbar">
+          <div class="composer-tools">
+            <label class="ghost-btn image-trigger" for="imageInput" id="imageTrigger"></label>
+            <input id="imageInput" class="visually-hidden" type="file" accept="image/*" />
+            <div class="emoji-picker">
+            <button id="emojiTrigger" class="ghost-btn emoji-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+            <div id="emojiPanel" class="emoji-panel hidden" role="dialog" aria-label="emoji panel">
+              ${emojiGroups.map((group) => `
+                <section class="emoji-group">
+                  <div class="emoji-group-title" data-emoji-group-label="${group.labelKey}"></div>
+                  <div class="emoji-grid">
+                    ${group.items.map((emoji) => `
+                      <button class="emoji-option" type="button" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>
+                    `).join('')}
+                  </div>
+                </section>
+              `).join('')}
+            </div>
+            </div>
+          </div>
+        </div>
         <textarea id="messageInput" maxlength="2000" disabled></textarea>
         <div class="composer-actions">
           <span class="hint" id="composerHint"></span>
@@ -238,6 +296,12 @@ const elements = {
   messageList: document.getElementById('messageList'),
   messageInput: document.getElementById('messageInput'),
   sendButton: document.getElementById('sendButton'),
+  imageTrigger: document.getElementById('imageTrigger'),
+  imageInput: document.getElementById('imageInput'),
+  emojiTrigger: document.getElementById('emojiTrigger'),
+  emojiPanel: document.getElementById('emojiPanel'),
+  emojiGroupLabels: Array.from(document.querySelectorAll('[data-emoji-group-label]')),
+  emojiOptions: Array.from(document.querySelectorAll('[data-emoji]')),
   composerHint: document.getElementById('composerHint'),
   composer: document.getElementById('composer'),
   dataPath: document.getElementById('dataPath'),
@@ -298,6 +362,19 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+function renderMessageContent(message) {
+  if (message.kind === 'image') {
+    return `
+      <div class="image-message">
+        <img class="message-image" src="${escapeHtml(message.text)}" alt="${escapeHtml(message.mediaName || t('imageAlt'))}" />
+        <div class="image-caption">${escapeHtml(message.mediaName || t('imageAlt'))}</div>
+      </div>
+    `;
+  }
+
+  return escapeHtml(message.text).replaceAll('\n', '<br>');
+}
+
 function formatTime(timestamp) {
   return new Intl.DateTimeFormat(state.settings.language || 'zh-CN', {
     hour: '2-digit',
@@ -339,7 +416,12 @@ function renderStaticText() {
   elements.changeDataPath.textContent = t('change');
   elements.storageHint.textContent = t('storageHint');
   elements.sendButton.textContent = t('send');
+  elements.imageTrigger.textContent = t('image');
+  elements.emojiTrigger.textContent = t('emoji');
   elements.messageInput.placeholder = t('messagePlaceholder');
+  elements.emojiGroupLabels.forEach((node) => {
+    node.textContent = t(node.dataset.emojiGroupLabel);
+  });
   elements.languageOptions.forEach((option) => {
     const language = option.dataset.language;
     option.textContent = languageLabel(language);
@@ -409,7 +491,11 @@ function renderConversation() {
     `;
     elements.messageInput.disabled = true;
     elements.sendButton.disabled = true;
+    elements.imageInput.disabled = true;
+    elements.imageTrigger.classList.add('disabled');
+    elements.emojiTrigger.disabled = true;
     elements.composerHint.textContent = t('composerIdle');
+    closeEmojiPanel();
     return;
   }
 
@@ -417,6 +503,9 @@ function renderConversation() {
   elements.activeStatus.textContent = `${peer.address}:${peer.listenPort}`;
   elements.messageInput.disabled = false;
   elements.sendButton.disabled = false;
+  elements.imageInput.disabled = false;
+  elements.imageTrigger.classList.remove('disabled');
+  elements.emojiTrigger.disabled = false;
   elements.composerHint.textContent = t('composerReady');
 
   if (!messages.length) {
@@ -438,7 +527,7 @@ function renderConversation() {
         <span>${formatTime(message.timestamp)}</span>
         <span class="status status-${message.status}">${escapeHtml(t(message.status))}</span>
       </div>
-      <div class="message-bubble">${escapeHtml(message.text).replaceAll('\n', '<br>')}</div>
+      <div class="message-bubble ${message.kind === 'image' ? 'message-bubble-image' : ''}">${renderMessageContent(message)}</div>
     </article>
   `).join('');
 
@@ -493,6 +582,16 @@ function closeLanguageMenu() {
   }
 }
 
+function closeEmojiPanel() {
+  elements.emojiPanel.classList.add('hidden');
+  elements.emojiTrigger.setAttribute('aria-expanded', 'false');
+}
+
+function openEmojiPanel() {
+  elements.emojiPanel.classList.remove('hidden');
+  elements.emojiTrigger.setAttribute('aria-expanded', 'true');
+}
+
 function openLanguageMenu() {
   closeThemeMenu();
   elements.languageMenu.classList.remove('hidden');
@@ -534,6 +633,34 @@ elements.themeTrigger.addEventListener('click', () => {
   closeThemeMenu();
 });
 
+elements.emojiTrigger.addEventListener('click', () => {
+  if (elements.emojiTrigger.disabled) {
+    return;
+  }
+  if (elements.emojiPanel.classList.contains('hidden')) {
+    openEmojiPanel();
+    elements.messageInput.focus();
+    return;
+  }
+  closeEmojiPanel();
+});
+
+function insertEmoji(emoji) {
+  const input = elements.messageInput;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = `${input.value.slice(0, start)}${emoji}${input.value.slice(end)}`;
+  const cursor = start + emoji.length;
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+}
+
+elements.emojiOptions.forEach((option) => {
+  option.addEventListener('click', () => {
+    insertEmoji(option.dataset.emoji);
+  });
+});
+
 elements.languageOptions.forEach((option) => {
   option.addEventListener('click', async () => {
     closeLanguageMenu();
@@ -569,6 +696,9 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('.theme-menu')) {
     closeThemeMenu();
   }
+  if (!event.target.closest('.emoji-picker')) {
+    closeEmojiPanel();
+  }
 });
 
 elements.changeDataPath.addEventListener('click', async () => {
@@ -583,6 +713,28 @@ elements.addDebugBot.addEventListener('click', async () => {
   state.activePeerId = peer.id;
   renderPeers();
   renderConversation();
+});
+
+elements.imageInput.addEventListener('change', async (event) => {
+  const [file] = event.target.files || [];
+  if (!file || !state.activePeerId) {
+    return;
+  }
+  if (file.size > maxImageBytes) {
+    window.alert(t('imageTooLarge'));
+    elements.imageInput.value = '';
+    return;
+  }
+
+  const dataURL = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('failed to read image'));
+    reader.readAsDataURL(file);
+  });
+
+  await SendImageMessage(state.activePeerId, dataURL, file.name);
+  elements.imageInput.value = '';
 });
 
 elements.manualConnect.addEventListener('click', async () => {
@@ -636,6 +788,7 @@ elements.composer.addEventListener('submit', async (event) => {
 
   await SendChatMessage(state.activePeerId, text);
   elements.messageInput.value = '';
+  closeEmojiPanel();
 });
 
 elements.messageInput.addEventListener('keydown', async (event) => {

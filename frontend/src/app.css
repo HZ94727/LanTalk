@@ -554,6 +554,31 @@ textarea:focus {
     background: linear-gradient(135deg, rgba(90, 178, 255, 0.25), rgba(45, 134, 255, 0.36));
 }
 
+.message-bubble-image {
+    padding: 12px;
+}
+
+.image-message {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.message-image {
+    display: block;
+    width: min(100%, 320px);
+    max-height: 260px;
+    border-radius: 16px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.image-caption {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+
 .status {
     text-transform: capitalize;
 }
@@ -568,7 +593,122 @@ textarea:focus {
 }
 
 .composer {
+    position: relative;
     padding: 16px;
+}
+
+.composer-toolbar {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 12px;
+}
+
+.composer-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.emoji-picker {
+    position: relative;
+}
+
+.image-trigger,
+.emoji-trigger {
+    min-height: 38px;
+    padding: 8px 14px;
+    border-radius: 14px;
+}
+
+.image-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.image-trigger.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.emoji-trigger:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.emoji-panel {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 12px);
+    z-index: 40;
+    width: min(420px, calc(100vw - 96px));
+    max-height: 320px;
+    padding: 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: 22px;
+    background: var(--menu-panel-bg);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(20px);
+    overflow-y: auto;
+}
+
+.emoji-panel.hidden {
+    display: none;
+}
+
+.emoji-group + .emoji-group {
+    margin-top: 12px;
+}
+
+.emoji-group-title {
+    margin-bottom: 8px;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.emoji-option {
+    display: grid;
+    place-items: center;
+    min-height: 42px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 1.35rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.emoji-option:hover {
+    background: var(--menu-option-hover);
+    transform: translateY(-1px);
+}
+
+.emoji-option:focus-visible {
+    outline: none;
+    border-color: rgba(90, 178, 255, 0.7);
+    background: var(--menu-option-hover);
 }
 
 .composer textarea {
@@ -735,6 +875,27 @@ input[type="number"]::-webkit-inner-spin-button {
 
     .composer {
         padding: 14px;
+    }
+
+    .composer-toolbar {
+        margin-bottom: 10px;
+    }
+
+    .emoji-panel {
+        width: min(380px, calc(100vw - 72px));
+        max-height: 280px;
+        padding: 12px;
+        border-radius: 20px;
+    }
+
+    .emoji-grid {
+        gap: 6px;
+    }
+
+    .emoji-option {
+        min-height: 38px;
+        border-radius: 12px;
+        font-size: 1.2rem;
     }
 
     .composer textarea {

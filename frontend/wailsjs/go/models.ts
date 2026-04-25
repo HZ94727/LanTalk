@@ -5,7 +5,10 @@ export namespace chat {
 	    peerId: string;
 	    senderId: string;
 	    senderName: string;
+	    kind: string;
 	    text: string;
+	    mediaName: string;
+	    mediaType: string;
 	    timestamp: number;
 	    direction: string;
 	    status: string;
@@ -20,7 +23,10 @@ export namespace chat {
 	        this.peerId = source["peerId"];
 	        this.senderId = source["senderId"];
 	        this.senderName = source["senderName"];
+	        this.kind = source["kind"];
 	        this.text = source["text"];
+	        this.mediaName = source["mediaName"];
+	        this.mediaType = source["mediaType"];
 	        this.timestamp = source["timestamp"];
 	        this.direction = source["direction"];
 	        this.status = source["status"];
