@@ -1,16 +1,13 @@
 html {
     height: 100%;
-    background:
-        radial-gradient(circle at top left, rgba(73, 154, 255, 0.20), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(255, 143, 91, 0.18), transparent 30%),
-        #0c1218;
-    color: #eff6ff;
+    background: var(--app-background);
+    color: var(--body-text, #eff6ff);
 }
 
 body {
     height: 100%;
     margin: 0;
-    color: #eff6ff;
+    color: var(--body-text, #eff6ff);
     font-family: "Nunito", "Segoe UI", sans-serif;
     overflow: hidden;
 }

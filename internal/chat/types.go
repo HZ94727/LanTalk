@@ -12,6 +12,7 @@ type Peer struct {
 	Address    string `json:"address"`
 	ListenPort int    `json:"listenPort"`
 	LastSeen   int64  `json:"lastSeen"`
+	Source     string `json:"source"`
 }
 
 type ChatMessage struct {
@@ -34,6 +35,7 @@ type Snapshot struct {
 
 type Settings struct {
 	Language string `json:"language"`
+	Theme    string `json:"theme"`
 }
 
 type announcement struct {

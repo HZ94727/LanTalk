@@ -32,6 +32,7 @@ export namespace chat {
 	    address: string;
 	    listenPort: number;
 	    lastSeen: number;
+	    source: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Peer(source);
@@ -44,6 +45,7 @@ export namespace chat {
 	        this.address = source["address"];
 	        this.listenPort = source["listenPort"];
 	        this.lastSeen = source["lastSeen"];
+	        this.source = source["source"];
 	    }
 	}
 	export class Profile {
@@ -64,6 +66,7 @@ export namespace chat {
 	}
 	export class Settings {
 	    language: string;
+	    theme: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -72,6 +75,7 @@ export namespace chat {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.language = source["language"];
+	        this.theme = source["theme"];
 	    }
 	}
 	export class Snapshot {

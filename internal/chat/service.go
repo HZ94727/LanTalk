@@ -19,6 +19,7 @@ const (
 	broadcastEvery   = 2 * time.Second
 	peerExpiry       = 8 * time.Second
 	maxMessageLength = 2000
+	debugEchoPeerID  = "debug-echo-bot"
 )
 
 type Callbacks struct {
@@ -201,6 +202,12 @@ func (s *Service) SendMessage(peerID, text string) error {
 		Timestamp:  message.Timestamp,
 	}
 
+	if peer.Source == "debug" {
+		s.appendMessage(peerID, message)
+		go s.sendDebugReply(peer, text)
+		return nil
+	}
+
 	if err := s.sendDirect(peer, payload); err != nil {
 		message.Status = "failed"
 		s.appendMessage(peerID, message)
@@ -211,8 +218,95 @@ func (s *Service) SendMessage(peerID, text string) error {
 	return nil
 }
 
+func (s *Service) EnsureDebugPeer() Peer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	peer, ok := s.peers[debugEchoPeerID]
+	if ok {
+		return peer
+	}
+
+	peer = Peer{
+		ID:         debugEchoPeerID,
+		Name:       "Echo Bot",
+		Address:    "Local simulator",
+		ListenPort: 0,
+		LastSeen:   time.Now().UnixMilli(),
+		Source:     "debug",
+	}
+	s.peers[peer.ID] = peer
+	s.emitPeersLocked()
+	return peer
+}
+
+func (s *Service) AddManualPeer(name, address string, port int) (Peer, error) {
+	name = strings.TrimSpace(name)
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return Peer{}, errors.New("address cannot be empty")
+	}
+	if port <= 0 || port > 65535 {
+		return Peer{}, errors.New("port must be between 1 and 65535")
+	}
+	if name == "" {
+		name = fmt.Sprintf("Manual %s:%d", address, port)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, peer := range s.peers {
+		if peer.Address == address && peer.ListenPort == port {
+			if peer.Name != name {
+				peer.Name = name
+				peer.LastSeen = time.Now().UnixMilli()
+				if peer.Source == "" {
+					peer.Source = "manual"
+				}
+				s.peers[peer.ID] = peer
+				s.emitPeersLocked()
+			}
+			return peer, nil
+		}
+	}
+
+	peer := Peer{
+		ID:         uuid.NewString(),
+		Name:       name,
+		Address:    address,
+		ListenPort: port,
+		LastSeen:   time.Now().UnixMilli(),
+		Source:     "manual",
+	}
+	s.peers[peer.ID] = peer
+	s.emitPeersLocked()
+	return peer, nil
+}
+
 func (s *Service) UpdateLanguage(language string) (Settings, error) {
-	settings := normalizeSettings(Settings{Language: language})
+	s.mu.RLock()
+	currentTheme := s.settings.Theme
+	s.mu.RUnlock()
+	settings := normalizeSettings(Settings{Language: language, Theme: currentTheme})
+
+	s.mu.Lock()
+	s.settings = settings
+	if err := s.persistLocked(); err != nil {
+		s.mu.Unlock()
+		return Settings{}, err
+	}
+	s.mu.Unlock()
+
+	s.emitSettings()
+	return settings, nil
+}
+
+func (s *Service) UpdateTheme(theme string) (Settings, error) {
+	s.mu.RLock()
+	currentLanguage := s.settings.Language
+	s.mu.RUnlock()
+	settings := normalizeSettings(Settings{Language: currentLanguage, Theme: theme})
 
 	s.mu.Lock()
 	s.settings = settings
@@ -340,6 +434,7 @@ func (s *Service) handleAnnouncement(incoming announcement, addr *net.UDPAddr) {
 		Address:    addr.IP.String(),
 		ListenPort: incoming.ListenPort,
 		LastSeen:   time.Now().UnixMilli(),
+		Source:     "lan",
 	}
 
 	s.emitPeersLocked()
@@ -405,6 +500,9 @@ func (s *Service) cleanupPeers() {
 	now := time.Now()
 	changed := false
 	for id, peer := range s.peers {
+		if peer.Source != "" && peer.Source != "lan" {
+			continue
+		}
 		lastSeen := time.UnixMilli(peer.LastSeen)
 		if now.Sub(lastSeen) > peerExpiry {
 			delete(s.peers, id)
@@ -415,6 +513,31 @@ func (s *Service) cleanupPeers() {
 	if changed {
 		s.emitPeersLocked()
 	}
+}
+
+func (s *Service) sendDebugReply(peer Peer, text string) {
+	delay := 550 * time.Millisecond
+	time.Sleep(delay)
+
+	reply := ChatMessage{
+		ID:         uuid.NewString(),
+		PeerID:     peer.ID,
+		SenderID:   peer.ID,
+		SenderName: peer.Name,
+		Text:       debugReplyText(text),
+		Timestamp:  time.Now().UnixMilli(),
+		Direction:  "inbound",
+		Status:     "received",
+	}
+	s.appendMessage(peer.ID, reply)
+}
+
+func debugReplyText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "Echo Bot: ..."
+	}
+	return "Echo Bot: " + trimmed
 }
 
 func (s *Service) appendMessage(peerID string, message ChatMessage) {
@@ -511,10 +634,18 @@ func defaultName(id string) string {
 }
 
 func normalizeSettings(settings Settings) Settings {
-	switch settings.Language {
+	normalized := settings
+	switch normalized.Language {
 	case "en-US", "zh-CN":
-		return settings
 	default:
-		return Settings{Language: "zh-CN"}
+		normalized.Language = "zh-CN"
 	}
+
+	switch normalized.Theme {
+	case "midnight", "paper", "forest":
+	default:
+		normalized.Theme = "midnight"
+	}
+
+	return normalized
 }

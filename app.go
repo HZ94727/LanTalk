@@ -80,6 +80,10 @@ func (a *App) UpdateLanguage(language string) (chat.Settings, error) {
 	return a.service.UpdateLanguage(language)
 }
 
+func (a *App) UpdateTheme(theme string) (chat.Settings, error) {
+	return a.service.UpdateTheme(theme)
+}
+
 func (a *App) DataPath() string {
 	return a.service.DataPath()
 }
@@ -96,4 +100,12 @@ func (a *App) ChooseDataDirectory() (string, error) {
 	}
 
 	return a.service.MoveDataFile(selectedDir)
+}
+
+func (a *App) EnsureDebugPeer() chat.Peer {
+	return a.service.EnsureDebugPeer()
+}
+
+func (a *App) AddManualPeer(name, address string, port int) (chat.Peer, error) {
+	return a.service.AddManualPeer(name, address, port)
 }

@@ -2,7 +2,7 @@ import './style.css';
 import './app.css';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
-import { Bootstrap, ChooseDataDirectory, DataPath, SendChatMessage, UpdateDisplayName, UpdateLanguage } from '../wailsjs/go/main/App';
+import { AddManualPeer, Bootstrap, ChooseDataDirectory, DataPath, EnsureDebugPeer, SendChatMessage, UpdateDisplayName, UpdateLanguage, UpdateTheme } from '../wailsjs/go/main/App';
 
 const dictionaries = {
   'zh-CN': {
@@ -12,7 +12,18 @@ const dictionaries = {
     send: '发送',
     settings: '设置',
     language: '语言',
+    theme: '主题风格',
     change: '修改',
+    debugTools: '本机调试',
+    addBot: '添加回声机器人',
+    debugHint: '只有一台电脑时，可以先用它验证消息发送、接收和本地存储。',
+    manualConnect: '手动连接',
+    manualName: '显示名称',
+    manualAddress: '地址',
+    manualPort: '端口',
+    connect: '连接',
+    debugTag: '调试',
+    manualTag: '手动',
     onlineNow: '当前在线',
     storage: '存储位置',
     storageHint: '聊天记录和设置会保存在这个目录中。',
@@ -35,6 +46,9 @@ const dictionaries = {
     failed: '发送失败',
     langZh: '简体中文',
     langEn: 'English',
+    themeMidnight: '午夜蓝',
+    themePaper: '暖白纸感',
+    themeForest: '森林夜色',
   },
   'en-US': {
     brandEyebrow: 'Local Network Messenger',
@@ -43,7 +57,18 @@ const dictionaries = {
     send: 'Send',
     settings: 'Settings',
     language: 'Language',
+    theme: 'Theme',
     change: 'Change',
+    debugTools: 'Local testing',
+    addBot: 'Add Echo Bot',
+    debugHint: 'When you only have one computer, use this to verify sending, receiving, and local persistence first.',
+    manualConnect: 'Manual connect',
+    manualName: 'Display name',
+    manualAddress: 'Address',
+    manualPort: 'Port',
+    connect: 'Connect',
+    debugTag: 'Debug',
+    manualTag: 'Manual',
     onlineNow: 'Online now',
     storage: 'Storage',
     storageHint: 'Chat history and settings are stored in this directory.',
@@ -66,6 +91,9 @@ const dictionaries = {
     failed: 'failed',
     langZh: 'Simplified Chinese',
     langEn: 'English',
+    themeMidnight: 'Midnight Blue',
+    themePaper: 'Paper Light',
+    themeForest: 'Forest Night',
   },
 };
 
@@ -103,6 +131,40 @@ document.querySelector('#app').innerHTML = `
             <button class="menu-option" type="button" data-language="en-US"></button>
           </div>
         </div>
+        <label class="label" id="themeLabel"></label>
+        <div class="theme-menu">
+          <button id="themeTrigger" class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span id="themeValue"></span>
+          </button>
+          <div id="themeMenu" class="menu-panel hidden" role="listbox" tabindex="-1">
+            <button class="menu-option" type="button" data-theme="midnight"></button>
+            <button class="menu-option" type="button" data-theme="paper"></button>
+            <button class="menu-option" type="button" data-theme="forest"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel debug-panel">
+        <div class="section-head">
+          <span id="debugTitle"></span>
+        </div>
+        <button id="addDebugBot" class="ghost-btn wide-btn" type="button"></button>
+        <p class="hint" id="debugHint"></p>
+        <div class="debug-grid">
+          <label class="field">
+            <span id="manualNameLabel" class="field-label"></span>
+            <input id="manualName" class="text-input" maxlength="40" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span id="manualAddressLabel" class="field-label"></span>
+            <input id="manualAddress" class="text-input" value="127.0.0.1" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span id="manualPortLabel" class="field-label"></span>
+            <input id="manualPort" class="text-input" type="number" min="1" max="65535" autocomplete="off" />
+          </label>
+        </div>
+        <button id="manualConnect" class="ghost-btn wide-btn" type="button"></button>
       </section>
 
       <section class="panel peers-panel">
@@ -148,6 +210,7 @@ const state = {
   self: null,
   settings: {
     language: 'zh-CN',
+    theme: 'midnight',
   },
   peers: [],
   conversations: {},
@@ -158,10 +221,16 @@ const elements = {
   displayName: document.getElementById('displayName'),
   saveName: document.getElementById('saveName'),
   profileHint: document.getElementById('profileHint'),
+  languageWrapper: document.querySelector('.language-menu'),
   languageTrigger: document.getElementById('languageTrigger'),
   languageMenu: document.getElementById('languageMenu'),
   languageValue: document.getElementById('languageValue'),
   languageOptions: Array.from(document.querySelectorAll('[data-language]')),
+  themeWrapper: document.querySelector('.theme-menu'),
+  themeTrigger: document.getElementById('themeTrigger'),
+  themeMenu: document.getElementById('themeMenu'),
+  themeValue: document.getElementById('themeValue'),
+  themeOptions: Array.from(document.querySelectorAll('[data-theme]')),
   peerCount: document.getElementById('peerCount'),
   peerList: document.getElementById('peerList'),
   activePeer: document.getElementById('activePeer'),
@@ -176,14 +245,36 @@ const elements = {
   nicknameLabel: document.getElementById('nicknameLabel'),
   settingsTitle: document.getElementById('settingsTitle'),
   languageLabel: document.getElementById('languageLabel'),
+  themeLabel: document.getElementById('themeLabel'),
   onlineTitle: document.getElementById('onlineTitle'),
   storageTitle: document.getElementById('storageTitle'),
   changeDataPath: document.getElementById('changeDataPath'),
   storageHint: document.getElementById('storageHint'),
+  debugTitle: document.getElementById('debugTitle'),
+  addDebugBot: document.getElementById('addDebugBot'),
+  debugHint: document.getElementById('debugHint'),
+  manualName: document.getElementById('manualName'),
+  manualAddress: document.getElementById('manualAddress'),
+  manualPort: document.getElementById('manualPort'),
+  manualConnect: document.getElementById('manualConnect'),
+  manualNameLabel: document.getElementById('manualNameLabel'),
+  manualAddressLabel: document.getElementById('manualAddressLabel'),
+  manualPortLabel: document.getElementById('manualPortLabel'),
 };
 
 function languageLabel(language) {
   return language === 'en-US' ? t('langEn') : t('langZh');
+}
+
+function themeLabel(theme) {
+  switch (theme) {
+    case 'paper':
+      return t('themePaper');
+    case 'forest':
+      return t('themeForest');
+    default:
+      return t('themeMidnight');
+  }
 }
 
 function t(key, vars = {}) {
@@ -227,12 +318,22 @@ function activePeer() {
 }
 
 function renderStaticText() {
+  document.documentElement.dataset.theme = state.settings.theme || 'midnight';
   elements.brandEyebrow.textContent = t('brandEyebrow');
   elements.nicknameLabel.textContent = t('nicknameLabel');
   elements.saveName.textContent = t('save');
   elements.settingsTitle.textContent = t('settings');
   elements.languageLabel.textContent = t('language');
   elements.languageValue.textContent = languageLabel(state.settings.language);
+  elements.themeLabel.textContent = t('theme');
+  elements.themeValue.textContent = themeLabel(state.settings.theme);
+  elements.debugTitle.textContent = t('debugTools');
+  elements.addDebugBot.textContent = t('addBot');
+  elements.debugHint.textContent = t('debugHint');
+  elements.manualConnect.textContent = t('connect');
+  elements.manualNameLabel.textContent = t('manualName');
+  elements.manualAddressLabel.textContent = t('manualAddress');
+  elements.manualPortLabel.textContent = t('manualPort');
   elements.onlineTitle.textContent = t('onlineNow');
   elements.storageTitle.textContent = t('storage');
   elements.changeDataPath.textContent = t('change');
@@ -243,6 +344,11 @@ function renderStaticText() {
     const language = option.dataset.language;
     option.textContent = languageLabel(language);
     option.classList.toggle('active', language === state.settings.language);
+  });
+  elements.themeOptions.forEach((option) => {
+    const theme = option.dataset.theme;
+    option.textContent = themeLabel(theme);
+    option.classList.toggle('active', theme === state.settings.theme);
   });
 
   if (!elements.dataPath.dataset.loaded) {
@@ -266,11 +372,16 @@ function renderPeers() {
   elements.peerList.classList.remove('is-empty');
   elements.peerList.innerHTML = state.peers.map((peer) => {
     const isActive = peer.id === state.activePeerId;
+    const tag = peer.source === 'debug'
+      ? `<span class="peer-tag">${escapeHtml(t('debugTag'))}</span>`
+      : peer.source === 'manual'
+        ? `<span class="peer-tag">${escapeHtml(t('manualTag'))}</span>`
+        : '';
     return `
       <button class="peer-card ${isActive ? 'active' : ''}" data-peer-id="${peer.id}">
         <div class="peer-avatar">${escapeHtml(peer.name.slice(0, 1).toUpperCase())}</div>
         <div class="peer-copy">
-          <strong>${escapeHtml(peer.name)}</strong>
+          <strong>${escapeHtml(peer.name)}${tag}</strong>
           <span>${escapeHtml(peer.address)}:${peer.listenPort}</span>
         </div>
       </button>
@@ -376,12 +487,34 @@ elements.saveName.addEventListener('click', async () => {
 function closeLanguageMenu() {
   elements.languageMenu.classList.add('hidden');
   elements.languageTrigger.setAttribute('aria-expanded', 'false');
-  document.body.classList.remove('menu-open');
+  elements.languageWrapper.classList.remove('open');
+  if (elements.themeMenu.classList.contains('hidden')) {
+    document.body.classList.remove('menu-open');
+  }
 }
 
 function openLanguageMenu() {
+  closeThemeMenu();
   elements.languageMenu.classList.remove('hidden');
   elements.languageTrigger.setAttribute('aria-expanded', 'true');
+  elements.languageWrapper.classList.add('open');
+  document.body.classList.add('menu-open');
+}
+
+function closeThemeMenu() {
+  elements.themeMenu.classList.add('hidden');
+  elements.themeTrigger.setAttribute('aria-expanded', 'false');
+  elements.themeWrapper.classList.remove('open');
+  if (elements.languageMenu.classList.contains('hidden')) {
+    document.body.classList.remove('menu-open');
+  }
+}
+
+function openThemeMenu() {
+  closeLanguageMenu();
+  elements.themeMenu.classList.remove('hidden');
+  elements.themeTrigger.setAttribute('aria-expanded', 'true');
+  elements.themeWrapper.classList.add('open');
   document.body.classList.add('menu-open');
 }
 
@@ -391,6 +524,14 @@ elements.languageTrigger.addEventListener('click', () => {
     return;
   }
   closeLanguageMenu();
+});
+
+elements.themeTrigger.addEventListener('click', () => {
+  if (elements.themeMenu.classList.contains('hidden')) {
+    openThemeMenu();
+    return;
+  }
+  closeThemeMenu();
 });
 
 elements.languageOptions.forEach((option) => {
@@ -410,9 +551,23 @@ elements.languageOptions.forEach((option) => {
   });
 });
 
+elements.themeOptions.forEach((option) => {
+  option.addEventListener('click', async () => {
+    closeThemeMenu();
+    const settings = await UpdateTheme(option.dataset.theme);
+    state.settings = settings;
+    renderStaticText();
+    renderPeers();
+    renderConversation();
+  });
+});
+
 document.addEventListener('click', (event) => {
   if (!event.target.closest('.language-menu')) {
     closeLanguageMenu();
+  }
+  if (!event.target.closest('.theme-menu')) {
+    closeThemeMenu();
   }
 });
 
@@ -421,6 +576,30 @@ elements.changeDataPath.addEventListener('click', async () => {
   elements.dataPath.textContent = path;
   elements.dataPath.title = path;
   elements.dataPath.dataset.loaded = 'true';
+});
+
+elements.addDebugBot.addEventListener('click', async () => {
+  const peer = await EnsureDebugPeer();
+  state.activePeerId = peer.id;
+  renderPeers();
+  renderConversation();
+});
+
+elements.manualConnect.addEventListener('click', async () => {
+  const port = Number(elements.manualPort.value);
+  if (!port) {
+    elements.manualPort.focus();
+    return;
+  }
+
+  const peer = await AddManualPeer(
+    elements.manualName.value,
+    elements.manualAddress.value,
+    port,
+  );
+  state.activePeerId = peer.id;
+  renderPeers();
+  renderConversation();
 });
 
 EventsOn('data:pathUpdated', (path) => {
@@ -441,6 +620,7 @@ EventsOn('settings:updated', (settings) => {
     });
   }
   closeLanguageMenu();
+  closeThemeMenu();
 });
 elements.composer.addEventListener('submit', async (event) => {
   event.preventDefault();
