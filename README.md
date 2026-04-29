@@ -1,66 +1,112 @@
 # LanTalk
 
-LanTalk is a local-network desktop messenger built with `Wails + Go + Vite`.
+简体中文 | [English](README.en-US.md)
 
-## What It Does
+LanTalk 是一个基于 `Wails + Go + Vite` 构建的局域网桌面通讯工具。它面向同一局域网内的电脑，提供自动发现、一对一聊天、图片发送、文件发送、本地历史记录和系统托盘等能力。
 
-- Discovers peers on the same LAN with UDP broadcast
-- Uses TCP for direct text messaging
-- Stores your nickname and chat history locally in a JSON file
-- Updates the UI in real time through Wails events
+## 功能特性
 
-## Project Structure
+- UDP 广播自动发现同一局域网内的 LanTalk 用户
+- TCP 点对点发送文本、图片和文件消息
+- 支持消息发送状态、失败重试、删除、转发和清空会话
+- 支持图片预览、缩放、复制、另存为和打开所在位置
+- 支持文件保存、打开、定位和可用性检查
+- 使用 SQLite 保存联系人、设置和聊天记录
+- 图片和文件落盘到本地媒体目录，并基于哈希去重
+- 本地敏感字段使用 AES-GCM 加密保存
+- 支持简体中文和英文界面
+- 支持多主题切换
+- 支持系统托盘、隐藏到托盘、未读数提示和单实例唤起
+- 支持本机 Echo Bot 和手动添加联系人，方便调试
 
-- `app.go`: Wails bindings exposed to the frontend
-- `internal/chat`: LAN discovery, direct messaging, and local persistence
-- `frontend/src`: the chat UI
+## 技术栈
 
-## Development
+- 桌面框架：Wails v2
+- 后端语言：Go
+- 前端构建：Vite
+- 前端实现：原生 JavaScript、HTML、CSS
+- 本地数据库：SQLite，使用 `modernc.org/sqlite`
+- 局域网通信：UDP 广播发现，TCP 点对点传输
+- 系统托盘：`github.com/getlantern/systray`
 
-Install frontend dependencies once:
+## 项目结构
+
+```text
+.
+├── app.go                    # Wails 绑定层
+├── main.go                   # 应用入口和窗口配置
+├── tray.go                   # 系统托盘
+├── internal
+│   ├── chat                  # 聊天、发现、存储、加密和媒体管理
+│   ├── clipimg               # 图片复制到剪贴板
+│   └── mediautil             # 媒体类型、Data URL 和文件名工具
+├── frontend
+│   ├── src                   # 前端界面和交互
+│   └── wailsjs               # Wails 生成绑定
+├── build                     # 图标、清单和安装器模板
+├── PROJECT_OVERVIEW.md       # 更详细的项目进度文档
+└── wails.json                # Wails 配置
+```
+
+## 开发运行
+
+安装前端依赖：
 
 ```bash
 cd frontend
 npm install
 ```
 
-Run the desktop app in development mode:
+运行开发模式：
 
 ```bash
 wails dev
 ```
 
-If `wails` is not in your `PATH`, on this machine it was installed with:
+如果本机还没有安装 Wails CLI：
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-## Build
+## 构建
 
 ```bash
 wails build
 ```
 
-The packaged executable is written to `build/bin/LanTalk.exe`.
+Windows 构建产物通常位于：
 
-## Local Data
+```text
+build/bin/LanTalk.exe
+```
 
-LanTalk stores state in your user config directory:
+## 本地数据
 
-- Windows: `%AppData%\\LanTalk\\state.json`
+LanTalk 默认把数据保存在用户配置目录下：
 
-The app also exposes the exact path in the sidebar so it is easy to inspect.
+```text
+%AppData%\LanTalk
+```
 
-## Current Scope
+主要数据包括：
 
-This first version focuses on:
+- `lantalk.db`：SQLite 数据库
+- `master.key`：本地加密密钥
+- `media/`：图片和文件等媒体内容
 
-- nickname management
-- automatic peer discovery
-- one-to-one text chat
-- local conversation persistence
+应用设置面板会显示当前保存目录，并支持迁移到新的目录。
 
-## Known Limitation
+## 测试
 
-Discovery currently listens on a fixed UDP port, so testing two LanTalk instances on the same Windows machine is not the ideal path. The app is meant to be opened on two devices within the same LAN for realistic testing.
+```bash
+go test ./...
+```
+
+## 当前限制
+
+- UDP 发现端口固定为 `48555`，同一台机器运行多个真实实例并不适合作为主要测试方式。
+- 局域网发现依赖广播能力，防火墙、虚拟网卡或网络隔离可能影响发现结果。
+- 文件传输目前适合小型附件，尚未实现大文件分片、断点续传和身份配对机制。
+
+更多细节见 [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)。
