@@ -8,7 +8,9 @@ body {
     height: 100%;
     margin: 0;
     color: var(--body-text, #eff6ff);
-    font-family: "Nunito", "Segoe UI", sans-serif;
+    font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     overflow: hidden;
 }
 
@@ -41,5 +43,5 @@ button {
 }
 
 ::selection {
-    background: rgba(73, 154, 255, 0.35);
+    background: rgba(7, 193, 96, 0.22);
 }

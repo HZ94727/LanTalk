@@ -24,9 +24,28 @@ type ChatMessage struct {
 	Text       string `json:"text"`
 	MediaName  string `json:"mediaName"`
 	MediaType  string `json:"mediaType"`
+	MediaSize  int64  `json:"mediaSize"`
+	MediaHash  string `json:"-"`
 	Timestamp  int64  `json:"timestamp"`
 	Direction  string `json:"direction"`
 	Status     string `json:"status"`
+}
+
+type TransferProgress struct {
+	PeerID    string `json:"peerId"`
+	MessageID string `json:"messageId"`
+	Progress  int    `json:"progress"`
+}
+
+type StorageStats struct {
+	MessageCount int   `json:"messageCount"`
+	MediaBytes   int64 `json:"mediaBytes"`
+}
+
+type MediaCleanupResult struct {
+	RemovedFiles   int   `json:"removedFiles"`
+	ReclaimedBytes int64 `json:"reclaimedBytes"`
+	MediaBytes     int64 `json:"mediaBytes"`
 }
 
 type Snapshot struct {
@@ -34,6 +53,12 @@ type Snapshot struct {
 	Settings      Settings                 `json:"settings"`
 	Peers         []Peer                   `json:"peers"`
 	Conversations map[string][]ChatMessage `json:"conversations"`
+}
+
+type ConversationPage struct {
+	PeerID   string        `json:"peerId"`
+	Messages []ChatMessage `json:"messages"`
+	HasMore  bool          `json:"hasMore"`
 }
 
 type Settings struct {
@@ -55,5 +80,6 @@ type directMessage struct {
 	Text       string `json:"text"`
 	MediaName  string `json:"mediaName"`
 	MediaType  string `json:"mediaType"`
+	MediaSize  int64  `json:"mediaSize"`
 	Timestamp  int64  `json:"timestamp"`
 }

@@ -10,8 +10,20 @@ export function Bootstrap() {
   return window['go']['main']['App']['Bootstrap']();
 }
 
+export function CheckFileMessageAvailable(arg1) {
+  return window['go']['main']['App']['CheckFileMessageAvailable'](arg1);
+}
+
 export function ChooseDataDirectory() {
   return window['go']['main']['App']['ChooseDataDirectory']();
+}
+
+export function CleanupUnusedMedia() {
+  return window['go']['main']['App']['CleanupUnusedMedia']();
+}
+
+export function ClearConversation(arg1) {
+  return window['go']['main']['App']['ClearConversation'](arg1);
 }
 
 export function CopyImageToClipboard(arg1) {
@@ -30,12 +42,64 @@ export function EnsureDebugPeer() {
   return window['go']['main']['App']['EnsureDebugPeer']();
 }
 
+export function LoadConversationPage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['LoadConversationPage'](arg1, arg2, arg3, arg4);
+}
+
+export function LoadFileSource(arg1, arg2) {
+  return window['go']['main']['App']['LoadFileSource'](arg1, arg2);
+}
+
+export function LoadImageSource(arg1, arg2) {
+  return window['go']['main']['App']['LoadImageSource'](arg1, arg2);
+}
+
+export function LoadStorageStats() {
+  return window['go']['main']['App']['LoadStorageStats']();
+}
+
+export function OpenFileMessage(arg1) {
+  return window['go']['main']['App']['OpenFileMessage'](arg1);
+}
+
+export function RetryMessage(arg1, arg2) {
+  return window['go']['main']['App']['RetryMessage'](arg1, arg2);
+}
+
+export function RevealFileMessage(arg1) {
+  return window['go']['main']['App']['RevealFileMessage'](arg1);
+}
+
+export function RevealImageMessage(arg1) {
+  return window['go']['main']['App']['RevealImageMessage'](arg1);
+}
+
+export function SaveFileMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveFileMessage'](arg1, arg2, arg3);
+}
+
+export function SaveImageMessage(arg1, arg2) {
+  return window['go']['main']['App']['SaveImageMessage'](arg1, arg2);
+}
+
 export function SendChatMessage(arg1, arg2) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2);
 }
 
+export function SendFileMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SendFileMessage'](arg1, arg2, arg3);
+}
+
 export function SendImageMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendImageMessage'](arg1, arg2, arg3);
+}
+
+export function SendLocalFileMessage(arg1, arg2) {
+  return window['go']['main']['App']['SendLocalFileMessage'](arg1, arg2);
+}
+
+export function SetUnreadCount(arg1) {
+  return window['go']['main']['App']['SetUnreadCount'](arg1);
 }
 
 export function UpdateDisplayName(arg1) {

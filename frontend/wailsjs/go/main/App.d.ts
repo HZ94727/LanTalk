@@ -6,7 +6,13 @@ export function AddManualPeer(arg1:string,arg2:string,arg3:number):Promise<chat.
 
 export function Bootstrap():Promise<chat.Snapshot>;
 
+export function CheckFileMessageAvailable(arg1:string):Promise<boolean>;
+
 export function ChooseDataDirectory():Promise<string>;
+
+export function CleanupUnusedMedia():Promise<chat.MediaCleanupResult>;
+
+export function ClearConversation(arg1:string):Promise<number>;
 
 export function CopyImageToClipboard(arg1:string):Promise<void>;
 
@@ -16,9 +22,35 @@ export function DeleteMessage(arg1:string,arg2:string):Promise<void>;
 
 export function EnsureDebugPeer():Promise<chat.Peer>;
 
+export function LoadConversationPage(arg1:string,arg2:number,arg3:string,arg4:number):Promise<chat.ConversationPage>;
+
+export function LoadFileSource(arg1:string,arg2:string):Promise<string>;
+
+export function LoadImageSource(arg1:string,arg2:string):Promise<string>;
+
+export function LoadStorageStats():Promise<chat.StorageStats>;
+
+export function OpenFileMessage(arg1:string):Promise<void>;
+
+export function RetryMessage(arg1:string,arg2:string):Promise<void>;
+
+export function RevealFileMessage(arg1:string):Promise<void>;
+
+export function RevealImageMessage(arg1:string):Promise<void>;
+
+export function SaveFileMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SaveImageMessage(arg1:string,arg2:string):Promise<string>;
+
 export function SendChatMessage(arg1:string,arg2:string):Promise<void>;
 
+export function SendFileMessage(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SendImageMessage(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SendLocalFileMessage(arg1:string,arg2:string):Promise<void>;
+
+export function SetUnreadCount(arg1:number):Promise<void>;
 
 export function UpdateDisplayName(arg1:string):Promise<chat.Profile>;
 

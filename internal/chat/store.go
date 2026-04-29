@@ -28,11 +28,15 @@ type jsonState struct {
 }
 
 type Store struct {
-	path    string
-	keyPath string
-	db      *sql.DB
-	crypto  *cryptoManager
-	mu      sync.Mutex
+	dataDir         string
+	mediaDir        string
+	path            string
+	keyPath         string
+	db              *sql.DB
+	crypto          *cryptoManager
+	mediaUsageBytes int64
+	mediaUsageKnown bool
+	mu              sync.Mutex
 }
 
 func NewStore(appName string) (*Store, error) {
@@ -63,10 +67,17 @@ func NewStoreFromDirectory(dataDir string) (*Store, error) {
 	}
 
 	store := &Store{
-		path:    dbPath,
-		keyPath: keyPath,
-		db:      db,
-		crypto:  crypto,
+		dataDir:  dataDir,
+		mediaDir: filepath.Join(dataDir, "media"),
+		path:     dbPath,
+		keyPath:  keyPath,
+		db:       db,
+		crypto:   crypto,
+	}
+
+	if err := os.MkdirAll(store.mediaDir, 0o755); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 
 	if err := store.init(); err != nil {
@@ -86,6 +97,18 @@ func NewStoreFromDirectory(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	if err := store.migratePlaintextMessages(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.migrateInlineImageMessages(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.migrateStoredImageMessages(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := store.migrateStoredFileMessages(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -122,6 +145,8 @@ func (s *Store) init() error {
 			text TEXT NOT NULL,
 			media_name TEXT NOT NULL DEFAULT '',
 			media_type TEXT NOT NULL DEFAULT '',
+			media_size INTEGER NOT NULL DEFAULT 0,
+			media_hash TEXT NOT NULL DEFAULT '',
 			timestamp INTEGER NOT NULL,
 			direction TEXT NOT NULL,
 			status TEXT NOT NULL
@@ -136,6 +161,9 @@ func (s *Store) init() error {
 	}
 
 	if err := s.ensureMessageColumns(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_kind_hash ON messages(kind, media_hash);`); err != nil {
 		return err
 	}
 
@@ -157,9 +185,6 @@ func (s *Store) Load() (persistedState, error) {
 		return state, err
 	}
 	if err := s.loadPeers(&state); err != nil {
-		return state, err
-	}
-	if err := s.loadMessages(&state); err != nil {
 		return state, err
 	}
 
@@ -229,18 +254,67 @@ func (s *Store) DeletePeer(peerID string) error {
 	return err
 }
 
+func (s *Store) HasMessagesForPeer(peerID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE peer_id = ?`, peerID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *Store) LoadConversationPeerIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`
+		SELECT DISTINCT peer_id
+		FROM messages
+		ORDER BY peer_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	peerIDs := make([]string, 0, 16)
+	for rows.Next() {
+		var peerID string
+		if err := rows.Scan(&peerID); err != nil {
+			return nil, err
+		}
+		peerID = strings.TrimSpace(peerID)
+		if peerID == "" {
+			continue
+		}
+		peerIDs = append(peerIDs, peerID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return peerIDs, nil
+}
+
 func (s *Store) SaveMessage(message ChatMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	encrypted, err := s.encryptMessage(message)
+	normalized, err := s.normalizeMessageMediaUnlocked(message)
+	if err != nil {
+		return err
+	}
+
+	encrypted, err := s.encryptMessage(normalized)
 	if err != nil {
 		return err
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO messages(id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, timestamp, direction, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO messages(id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			peer_id = excluded.peer_id,
 			sender_id = excluded.sender_id,
@@ -249,11 +323,57 @@ func (s *Store) SaveMessage(message ChatMessage) error {
 			text = excluded.text,
 			media_name = excluded.media_name,
 			media_type = excluded.media_type,
+			media_size = excluded.media_size,
+			media_hash = excluded.media_hash,
 			timestamp = excluded.timestamp,
 			direction = excluded.direction,
 			status = excluded.status
-	`, encrypted.ID, encrypted.PeerID, encrypted.SenderID, encrypted.SenderName, encrypted.Kind, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.Timestamp, encrypted.Direction, encrypted.Status)
+	`, encrypted.ID, encrypted.PeerID, encrypted.SenderID, encrypted.SenderName, encrypted.Kind, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.MediaSize, encrypted.MediaHash, encrypted.Timestamp, encrypted.Direction, encrypted.Status)
 	return err
+}
+
+func (s *Store) MarkPendingOutgoingFailed() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		UPDATE messages
+		SET status = 'failed'
+		WHERE direction = 'outbound' AND status = 'sending'
+	`)
+	return err
+}
+
+func (s *Store) LoadMessage(peerID, messageID string) (ChatMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var message ChatMessage
+	err := s.db.QueryRow(`
+		SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status
+		FROM messages
+		WHERE peer_id = ? AND id = ?
+		LIMIT 1
+	`, peerID, messageID).Scan(
+		&message.ID,
+		&message.PeerID,
+		&message.SenderID,
+		&message.SenderName,
+		&message.Kind,
+		&message.Text,
+		&message.MediaName,
+		&message.MediaType,
+		&message.MediaSize,
+		&message.MediaHash,
+		&message.Timestamp,
+		&message.Direction,
+		&message.Status,
+	)
+	if err != nil {
+		return ChatMessage{}, err
+	}
+
+	return s.decryptMessage(message)
 }
 
 func (s *Store) DeleteMessage(messageID string) error {
@@ -266,6 +386,13 @@ func (s *Store) DeleteMessage(messageID string) error {
 
 func (s *Store) Path() string {
 	return s.path
+}
+
+func (s *Store) DataDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.dataDir
 }
 
 func (s *Store) Move(targetDir string) (string, error) {
@@ -286,6 +413,7 @@ func (s *Store) Move(targetDir string) (string, error) {
 
 	targetPath := filepath.Join(targetDir, "lantalk.db")
 	targetKeyPath := filepath.Join(targetDir, "master.key")
+	targetMediaDir := filepath.Join(targetDir, "media")
 	if targetPath == s.path {
 		return targetPath, nil
 	}
@@ -301,14 +429,21 @@ func (s *Store) Move(targetDir string) (string, error) {
 	if _, err := copyFile(oldKeyPath, targetKeyPath); err != nil {
 		return "", err
 	}
+	if err := copyDir(filepath.Join(s.dataDir, "media"), targetMediaDir); err != nil {
+		return "", err
+	}
 
 	newDB, err := sql.Open("sqlite", targetPath)
 	if err != nil {
 		return "", err
 	}
 	s.db = newDB
+	s.dataDir = targetDir
+	s.mediaDir = targetMediaDir
 	s.path = targetPath
 	s.keyPath = targetKeyPath
+	s.mediaUsageKnown = false
+	s.mediaUsageBytes = 0
 
 	if err := s.init(); err != nil {
 		return "", err
@@ -318,6 +453,7 @@ func (s *Store) Move(targetDir string) (string, error) {
 		_ = os.Remove(oldPath)
 		_ = os.Remove(oldKeyPath)
 		_ = os.Remove(filepath.Join(filepath.Dir(oldPath), "state.json"))
+		_ = os.RemoveAll(filepath.Join(filepath.Dir(oldPath), "media"))
 	}
 
 	return targetPath, nil
@@ -374,7 +510,7 @@ func (s *Store) loadPeers(state *persistedState) error {
 
 func (s *Store) loadMessages(state *persistedState) error {
 	rows, err := s.db.Query(`
-		SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, timestamp, direction, status
+		SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status
 		FROM messages
 		ORDER BY timestamp, id
 	`)
@@ -394,6 +530,8 @@ func (s *Store) loadMessages(state *persistedState) error {
 			&message.Text,
 			&message.MediaName,
 			&message.MediaType,
+			&message.MediaSize,
+			&message.MediaHash,
 			&message.Timestamp,
 			&message.Direction,
 			&message.Status,
@@ -408,6 +546,93 @@ func (s *Store) loadMessages(state *persistedState) error {
 	}
 
 	return rows.Err()
+}
+
+func (s *Store) LoadConversationPage(peerID string, beforeTimestamp int64, beforeID string, limit int) (ConversationPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	page := ConversationPage{
+		PeerID:   peerID,
+		Messages: []ChatMessage{},
+		HasMore:  false,
+	}
+
+	if strings.TrimSpace(peerID) == "" {
+		return page, errors.New("peer id is required")
+	}
+	if limit <= 0 {
+		limit = 40
+	}
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+
+	if beforeTimestamp > 0 {
+		rows, err = s.db.Query(`
+			SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status
+			FROM messages
+			WHERE peer_id = ? AND (timestamp < ? OR (timestamp = ? AND id < ?))
+			ORDER BY timestamp DESC, id DESC
+			LIMIT ?
+		`, peerID, beforeTimestamp, beforeTimestamp, beforeID, limit+1)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status
+			FROM messages
+			WHERE peer_id = ?
+			ORDER BY timestamp DESC, id DESC
+			LIMIT ?
+		`, peerID, limit+1)
+	}
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+
+	descMessages := make([]ChatMessage, 0, limit+1)
+	for rows.Next() {
+		var message ChatMessage
+		if err := rows.Scan(
+			&message.ID,
+			&message.PeerID,
+			&message.SenderID,
+			&message.SenderName,
+			&message.Kind,
+			&message.Text,
+			&message.MediaName,
+			&message.MediaType,
+			&message.MediaSize,
+			&message.MediaHash,
+			&message.Timestamp,
+			&message.Direction,
+			&message.Status,
+		); err != nil {
+			return page, err
+		}
+		message, err = s.decryptMessage(message)
+		if err != nil {
+			return page, err
+		}
+		descMessages = append(descMessages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return page, err
+	}
+
+	if len(descMessages) > limit {
+		page.HasMore = true
+		descMessages = descMessages[:limit]
+	}
+
+	page.Messages = make([]ChatMessage, 0, len(descMessages))
+	for i := len(descMessages) - 1; i >= 0; i-- {
+		page.Messages = append(page.Messages, descMessages[i])
+	}
+
+	return page, nil
 }
 
 func (s *Store) migrateJSONIfNeeded(jsonPath string) error {
@@ -481,8 +706,8 @@ func (s *Store) migrateJSONIfNeeded(jsonPath string) error {
 				return err
 			}
 			if _, err = tx.Exec(`
-				INSERT INTO messages(id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, timestamp, direction, status)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				INSERT INTO messages(id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(id) DO UPDATE SET
 					peer_id = excluded.peer_id,
 					sender_id = excluded.sender_id,
@@ -491,10 +716,12 @@ func (s *Store) migrateJSONIfNeeded(jsonPath string) error {
 					text = excluded.text,
 					media_name = excluded.media_name,
 					media_type = excluded.media_type,
+					media_size = excluded.media_size,
+					media_hash = excluded.media_hash,
 					timestamp = excluded.timestamp,
 					direction = excluded.direction,
 					status = excluded.status
-			`, encrypted.ID, encrypted.PeerID, encrypted.SenderID, encrypted.SenderName, encrypted.Kind, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.Timestamp, encrypted.Direction, encrypted.Status); err != nil {
+			`, encrypted.ID, encrypted.PeerID, encrypted.SenderID, encrypted.SenderName, encrypted.Kind, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.MediaSize, encrypted.MediaHash, encrypted.Timestamp, encrypted.Direction, encrypted.Status); err != nil {
 				return err
 			}
 
@@ -573,7 +800,7 @@ func shortID(value string) string {
 
 func (s *Store) migratePlaintextMessages() error {
 	rows, err := s.db.Query(`
-		SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, timestamp, direction, status
+		SELECT id, peer_id, sender_id, sender_name, kind, text, media_name, media_type, media_size, media_hash, timestamp, direction, status
 		FROM messages
 	`)
 	if err != nil {
@@ -593,6 +820,8 @@ func (s *Store) migratePlaintextMessages() error {
 			&message.Text,
 			&message.MediaName,
 			&message.MediaType,
+			&message.MediaSize,
+			&message.MediaHash,
 			&message.Timestamp,
 			&message.Direction,
 			&message.Status,
@@ -622,9 +851,9 @@ func (s *Store) migratePlaintextMessages() error {
 		}
 		if _, err := tx.Exec(`
 			UPDATE messages
-			SET sender_name = ?, text = ?, media_name = ?, media_type = ?
+			SET sender_name = ?, text = ?, media_name = ?, media_type = ?, media_size = ?, media_hash = ?
 			WHERE id = ?
-		`, encrypted.SenderName, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.ID); err != nil {
+		`, encrypted.SenderName, encrypted.Text, encrypted.MediaName, encrypted.MediaType, encrypted.MediaSize, encrypted.MediaHash, encrypted.ID); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -770,6 +999,8 @@ func (s *Store) encryptMessage(message ChatMessage) (ChatMessage, error) {
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	encrypted.MediaSize = message.MediaSize
+	encrypted.MediaHash = message.MediaHash
 	return encrypted, nil
 }
 
@@ -795,6 +1026,8 @@ func (s *Store) decryptMessage(message ChatMessage) (ChatMessage, error) {
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	decrypted.MediaSize = message.MediaSize
+	decrypted.MediaHash = message.MediaHash
 	return decrypted, nil
 }
 
@@ -803,6 +1036,8 @@ func (s *Store) ensureMessageColumns() error {
 		`ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';`,
 		`ALTER TABLE messages ADD COLUMN media_name TEXT NOT NULL DEFAULT '';`,
 		`ALTER TABLE messages ADD COLUMN media_type TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE messages ADD COLUMN media_size INTEGER NOT NULL DEFAULT 0;`,
+		`ALTER TABLE messages ADD COLUMN media_hash TEXT NOT NULL DEFAULT '';`,
 	}
 
 	for _, statement := range statements {
